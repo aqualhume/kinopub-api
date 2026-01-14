@@ -54,7 +54,7 @@ To start the OAuth2 **device flow** (`POST /oauth2/device?grant_type=device_code
 - `client_id`
 - `client_secret`
 
-Known `client_id` values seen in the wild (secrets intentionally omitted):
+Known `client_id` values seen in the wild (i.e. https://github.com/quarckster/kodi.kino.pub/blob/master/src/resources/lib/auth.py):
 
 - `android`
 - `xbmc`
