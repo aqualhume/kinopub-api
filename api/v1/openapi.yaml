@@ -1,0 +1,2180 @@
+openapi: 3.0.3
+
+info:
+  title: KinoPub API
+  version: "1.0.0"
+  description: |
+    OpenAPI (Swagger) spec generated from the markdown API docs in `api/v1/*.md`.
+
+    Base URL: `https://api.service-kp.com/`
+
+servers:
+  - url: https://api.service-kp.com
+
+security:
+  # Most endpoints accept either:
+  # - Authorization: Bearer <access_token>  (preferred)
+  # - ?access_token=<access_token>          (legacy)
+  - bearerAuth: []
+  - accessTokenQuery: []
+
+tags:
+  - name: Authentication
+  - name: User
+  - name: Device
+  - name: Content
+  - name: Bookmarks
+  - name: Collections
+  - name: Watching
+  - name: History
+  - name: TV
+  - name: References
+
+paths:
+  /oauth2/device:
+    post:
+      tags: [Authentication]
+      summary: OAuth2 Device Flow (device code / polling / refresh)
+      description: |
+        This single endpoint is used for all OAuth2 Device Flow steps via `grant_type`:
+
+        - `grant_type=device_code` + `client_id` + `client_secret` -> `DeviceCodeResponse`
+        - `grant_type=device_token` + `code` + `client_id` + `client_secret` -> `TokenResponse` (or 400 OAuth error)
+        - `grant_type=refresh_token` + `refresh_token` + `client_id` + `client_secret` -> `TokenResponse`
+
+        Notes:
+        - Poll no more often than `interval` seconds returned by `device_code`.
+        - `token_type` can be omitted by the API; treat it as optional and default to `Bearer`.
+      operationId: oauth2Device
+      security: []
+      parameters:
+        - name: grant_type
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [device_code, device_token, refresh_token]
+          description: OAuth grant type selector.
+        - name: client_id
+          in: query
+          required: true
+          schema: { type: string }
+        - name: client_secret
+          in: query
+          required: true
+          schema: { type: string }
+        - name: code
+          in: query
+          required: false
+          schema: { type: string }
+          description: Required when `grant_type=device_token` (device polling).
+        - name: refresh_token
+          in: query
+          required: false
+          schema: { type: string }
+          description: Required when `grant_type=refresh_token`.
+      responses:
+        "200":
+          description: Device code response (step 1) or token response (step 2/3).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/DeviceCodeResponse"
+                  - $ref: "#/components/schemas/TokenResponse"
+              examples:
+                device_code:
+                  summary: Step 1 - device_code
+                  value:
+                    code: ab23lcdefg340g0jgfgji45jb
+                    user_code: ASDFGH
+                    verification_uri: https://kino.pub/device
+                    expires_in: 8600
+                    interval: 5
+                token_success:
+                  summary: Step 2/3 - token success
+                  value:
+                    access_token: asdfghjkl123456789
+                    token_type: bearer
+                    expires_in: 3600
+                    refresh_token: qwertyu12345678
+                    scope: null
+        "400":
+          description: OAuth error (e.g., authorization_pending while polling).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthErrorResponse"
+              example:
+                error: authorization_pending
+                error_description: Optional text
+
+  /v1/user:
+    get:
+      tags: [User]
+      summary: Get current user info
+      operationId: getUser
+      responses:
+        "200":
+          description: User profile + subscription.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserResponse"
+              example:
+                status: 200
+                user:
+                  username: someuser
+                  reg_date: "2019-01-01"
+                  subscription:
+                    active: true
+                    end_time: 1704153600
+                    days: 12.5
+                  profile:
+                    name: User Name
+                    avatar: https://example.com/avatar.jpg
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/device:
+    get:
+      tags: [Device]
+      summary: List account devices
+      operationId: listDevices
+      responses:
+        "200":
+          description: Devices linked to the account.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DevicesResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/device/info:
+    get:
+      tags: [Device]
+      summary: Get current device info
+      operationId: getCurrentDevice
+      responses:
+        "200":
+          description: Current device.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/device/{id}:
+    get:
+      tags: [Device]
+      summary: Get device by id
+      operationId: getDeviceById
+      parameters:
+        - $ref: "#/components/parameters/deviceIdPath"
+      responses:
+        "200":
+          description: Device info.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/device/{id}/settings:
+    get:
+      tags: [Device]
+      summary: Get device settings map
+      operationId: getDeviceSettings
+      parameters:
+        - $ref: "#/components/parameters/deviceIdPath"
+      responses:
+        "200":
+          description: Map of settings keys to `{label, value, type}` objects.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceSettingsResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [Device]
+      summary: Update device settings
+      operationId: updateDeviceSettings
+      parameters:
+        - $ref: "#/components/parameters/deviceIdPath"
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required:
+                - supportSsl
+                - supportHevc
+                - supportHdr
+                - support4k
+                - mixedPlaylist
+                - streamingType
+                - serverLocation
+              properties:
+                supportSsl: { type: integer, description: "0|1" }
+                supportHevc: { type: integer, description: "0|1" }
+                supportHdr: { type: integer, description: "0|1" }
+                support4k: { type: integer, description: "0|1" }
+                mixedPlaylist: { type: integer, description: "0|1" }
+                streamingType:
+                  type: integer
+                  description: "ID from GET /v1/references/streaming-type"
+                serverLocation:
+                  type: integer
+                  description: "ID from GET /v1/references/server-location"
+            example:
+              supportSsl: 1
+              supportHevc: 1
+              supportHdr: 0
+              support4k: 0
+              mixedPlaylist: 0
+              streamingType: 1
+              serverLocation: 1
+      responses:
+        "200":
+          description: Status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+              example: { status: 200 }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/device/notify:
+    post:
+      tags: [Device]
+      summary: Register/update current device info
+      operationId: notifyDevice
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                title: { type: string, description: "Device name shown to the user" }
+                hardware: { type: string, description: "Hardware info" }
+                software: { type: string, description: "Software/OS info" }
+            example:
+              title: KinoPub
+              hardware: Pixel_8
+              software: Android_15
+      responses:
+        "200":
+          description: Status.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StatusResponse" }
+              example: { status: 200 }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/device/unlink:
+    post:
+      tags: [Device]
+      summary: Unlink current device (logout)
+      operationId: unlinkCurrentDevice
+      responses:
+        "200":
+          description: Status.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StatusResponse" }
+              example: { status: 200 }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/device/remove:
+    post:
+      tags: [Device]
+      summary: Remove device by id (query)
+      operationId: removeDeviceByQuery
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Removed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DeviceRemoveResponse" }
+              example: { status: 200, current: false }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/device/{id}/remove:
+    post:
+      tags: [Device]
+      summary: Remove device by id (path)
+      operationId: removeDeviceByPath
+      parameters:
+        - $ref: "#/components/parameters/deviceIdPath"
+      responses:
+        "200":
+          description: Removed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DeviceRemoveResponse" }
+              example: { status: 200, current: false }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/types:
+    get:
+      tags: [Content]
+      summary: Get content types
+      operationId: getContentTypes
+      responses:
+        "200":
+          description: Content type list.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TypesResponse" }
+              example:
+                status: 200
+                items:
+                  - { id: movie, title: Movies }
+                  - { id: serial, title: Series }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/genres:
+    get:
+      tags: [Content]
+      summary: Get genres
+      operationId: getGenres
+      parameters:
+        - name: type
+          in: query
+          required: false
+          schema: { type: string }
+          description: Optional genre group/type filter.
+      responses:
+        "200":
+          description: Genre list.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GenresResponse" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/countries:
+    get:
+      tags: [Content]
+      summary: Get countries
+      operationId: getCountries
+      responses:
+        "200":
+          description: Country list.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CountriesResponse" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/subtitles:
+    get:
+      tags: [Content]
+      summary: Get subtitles languages
+      operationId: getSubtitles
+      responses:
+        "200":
+          description: Subtitle languages list.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SubtitlesResponse" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/items:
+    get:
+      tags: [Content]
+      summary: List content items
+      operationId: listItems
+      parameters:
+        - name: type
+          in: query
+          required: false
+          schema: { type: string }
+        - name: genre
+          in: query
+          required: false
+          schema: { type: string }
+          description: One or more genre ids (often comma-separated).
+        - name: country
+          in: query
+          required: false
+          schema: { type: string }
+          description: One or more country ids (often comma-separated).
+        - name: year
+          in: query
+          required: false
+          schema: { type: string }
+        - name: finished
+          in: query
+          required: false
+          schema: { type: integer, enum: [0, 1] }
+        - name: actor
+          in: query
+          required: false
+          schema: { type: string }
+        - name: director
+          in: query
+          required: false
+          schema: { type: string }
+        - name: title
+          in: query
+          required: false
+          schema: { type: string }
+          description: Title search/filter (API-defined).
+        - name: letter
+          in: query
+          required: false
+          schema: { type: string }
+        - name: quality
+          in: query
+          required: false
+          style: form
+          explode: true
+          schema:
+            type: array
+            items: { type: integer }
+          description: Repeated query parameter (e.g., `quality=1&quality=2`).
+        - name: sort
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: ["updated-", "created-", "rating-", "views-", "year-"]
+          description: "Sorting (API-defined). Known values: `updated-`, `created-`, `rating-`, `views-`, `year-` (trailing `-` indicates descending)."
+        - name: "conditions[]"
+          in: query
+          required: false
+          style: form
+          explode: true
+          schema:
+            type: array
+            items: { type: string }
+          description: |
+            Repeated query parameter key `conditions[]` used for advanced filtering (API-defined).
+
+            Known condition keys (observed in the official KinoPub app and accepted by the API):
+            - `year` (e.g. `year>=1900`, `year<=2020`, `year=2001`)
+            - `imdb_rating` (e.g. `imdb_rating>=7`)
+            - `kinopoisk_rating` (e.g. `kinopoisk_rating>=7`)
+            - `created` (e.g. `created>0` or `created>1704067200`)
+
+            Each element is a string expression; pass multiple conditions by repeating the key:
+            `...&conditions[]=year>=1900&conditions[]=imdb_rating>=7`
+          example:
+            - "year>=1900"
+            - "imdb_rating>=7"
+        - name: params
+          in: query
+          required: false
+          style: form
+          explode: true
+          schema:
+            type: object
+            additionalProperties: { type: string }
+          description: |
+            Additional query parameters (official app uses Retrofit `@QueryMap`; keys vary).
+
+            This object is serialized as *additional query keys* (e.g. `?country=1&year=2020`), not as `params=...`.
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/perpage"
+      responses:
+        "200":
+          description: Items list.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ItemsResponse" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/items/{id}:
+    get:
+      tags: [Content]
+      summary: Get item details
+      operationId: getItemDetails
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: nolinks
+          in: query
+          required: false
+          schema: { type: integer, enum: [0, 1] }
+          description: When 1, server may omit heavy streaming link payloads.
+      responses:
+        "200":
+          description: Item details.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ItemDetailResponse" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/items/search:
+    get:
+      tags: [Content]
+      summary: Search items
+      operationId: searchItems
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema: { type: string }
+        - name: type
+          in: query
+          required: false
+          schema: { type: string }
+        - name: field
+          in: query
+          required: false
+          schema: { type: string }
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/perpage"
+        - name: sectioned
+          in: query
+          required: false
+          schema: { type: integer, enum: [0, 1] }
+          description: Legacy behavior may change response shape when set to 1.
+      responses:
+        "200":
+          description: Items list (same as /v1/items).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ItemsResponse" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/items/similar:
+    get:
+      tags: [Content]
+      summary: Get similar items
+      operationId: getSimilarItems
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema: { type: integer }
+          description: Item id.
+      responses:
+        "200":
+          description: Items list.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ItemsResponse" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/items/fresh:
+    get:
+      tags: [Content]
+      summary: Shortcut list (fresh content)
+      operationId: getFreshItems
+      parameters:
+        - name: type
+          in: query
+          required: false
+          schema: { type: string }
+        - name: genre
+          in: query
+          required: false
+          schema: { type: string }
+          description: One or more genre ids (often comma-separated).
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/perpage"
+      responses:
+        "200":
+          description: Items list.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ItemsResponse" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/items/hot:
+    get:
+      tags: [Content]
+      summary: Shortcut list (hot content)
+      operationId: getHotItems
+      parameters:
+        - name: type
+          in: query
+          required: false
+          schema: { type: string }
+        - name: genre
+          in: query
+          required: false
+          schema: { type: string }
+          description: One or more genre ids (often comma-separated).
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/perpage"
+      responses:
+        "200":
+          description: Items list.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ItemsResponse" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/items/popular:
+    get:
+      tags: [Content]
+      summary: Shortcut list (popular content)
+      operationId: getPopularItems
+      parameters:
+        - name: type
+          in: query
+          required: false
+          schema: { type: string }
+        - name: genre
+          in: query
+          required: false
+          schema: { type: string }
+          description: One or more genre ids (often comma-separated).
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/perpage"
+      responses:
+        "200":
+          description: Items list.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ItemsResponse" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/items/media-links:
+    get:
+      tags: [Content]
+      summary: Get streaming files and subtitles for a media id
+      operationId: getMediaLinks
+      parameters:
+        - name: mid
+          in: query
+          required: true
+          schema: { type: integer }
+          description: Media id.
+      responses:
+        "200":
+          description: Streaming file URLs + subtitles. (No `status` wrapper in this payload.)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MediaLinksResponse" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/items/media-video-link:
+    get:
+      tags: [Content]
+      summary: Get a single playable URL for a file path + stream type
+      operationId: getMediaVideoLink
+      parameters:
+        - name: file
+          in: query
+          required: true
+          schema: { type: string }
+          example: "/b/8c/diBAgF24FkaNBwPpB.mp4"
+        - name: type
+          in: query
+          required: true
+          schema: { type: string }
+          example: hls4
+      responses:
+        "200":
+          description: Playable URL.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MediaVideoLinkResponse" }
+              example: { url: "https://host/hls4/client/token/path/to/file.mp4?loc=de" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/items/trailer:
+    get:
+      tags: [Content]
+      summary: Get trailer info for an item
+      operationId: getTrailer
+      parameters:
+        - name: id
+          in: query
+          required: false
+          schema: { type: integer }
+        - name: sid
+          in: query
+          required: false
+          schema: { type: string }
+          description: Trailer id (API-defined).
+      responses:
+        "200":
+          description: Trailer info.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TrailerResponse" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/items/vote:
+    get:
+      tags: [Content]
+      summary: Vote like/dislike for an item
+      operationId: voteItem
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema: { type: integer }
+        - name: like
+          in: query
+          required: true
+          schema: { type: integer, enum: [0, 1] }
+      responses:
+        "200":
+          description: Vote result.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VoteResponse" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/items/comments:
+    get:
+      tags: [Content]
+      summary: Get comments for an item
+      operationId: getItemComments
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Comments list.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CommentsResponse" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/bookmarks:
+    get:
+      tags: [Bookmarks]
+      summary: List bookmark folders
+      operationId: listBookmarkFolders
+      responses:
+        "200":
+          description: Bookmark folders.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BookmarkFoldersResponse" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/bookmarks/{id}:
+    get:
+      tags: [Bookmarks]
+      summary: List items in a bookmark folder
+      operationId: listBookmarkItems
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/perpage"
+      responses:
+        "200":
+          description: Items in folder.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BookmarkItemsResponse" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/bookmarks/get-item-folders:
+    get:
+      tags: [Bookmarks]
+      summary: Get folders that contain a given item
+      operationId: getItemBookmarkFolders
+      parameters:
+        - name: item
+          in: query
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Folders that contain the item.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ItemFoldersResponse" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/bookmarks/create:
+    post:
+      tags: [Bookmarks]
+      summary: Create a bookmark folder
+      operationId: createBookmarkFolder
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title: { type: string }
+            example: { title: MyFolder }
+      responses:
+        "200":
+          description: Created folder.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CreateFolderResponse" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/bookmarks/add:
+    post:
+      tags: [Bookmarks]
+      summary: Add an item to a folder
+      operationId: addBookmarkItem
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [item, folder]
+              properties:
+                item: { type: integer }
+                folder: { type: integer }
+            example: { item: 123, folder: 1 }
+      responses:
+        "200":
+          description: Action result.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BookmarkActionResponse" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/bookmarks/remove-item:
+    post:
+      tags: [Bookmarks]
+      summary: Remove an item from a folder
+      operationId: removeBookmarkItem
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [item, folder]
+              properties:
+                item: { type: integer }
+                folder: { type: integer }
+            example: { item: 123, folder: 1 }
+      responses:
+        "200":
+          description: Action result.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BookmarkActionResponse" }
+              example: { status: 200 }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/bookmarks/remove-folder:
+    post:
+      tags: [Bookmarks]
+      summary: Delete a bookmark folder
+      operationId: removeBookmarkFolder
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [folder]
+              properties:
+                folder: { type: integer }
+            example: { folder: 1 }
+      responses:
+        "200":
+          description: Action result.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BookmarkActionResponse" }
+              example: { status: 200 }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/collections:
+    get:
+      tags: [Collections]
+      summary: List collections
+      operationId: listCollections
+      parameters:
+        - name: sort
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: ["views-", "watchers-", "updated-", "created-"]
+          description: "Sorting (API-defined). Known values: `views-`, `watchers-`, `updated-`, `created-` (trailing `-` indicates descending)."
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/perpage"
+      responses:
+        "200":
+          description: Collections list.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CollectionsResponse" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/collections/view:
+    get:
+      tags: [Collections]
+      summary: Get items in a collection
+      operationId: viewCollection
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema: { type: integer }
+          description: Collection id.
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/perpage"
+      responses:
+        "200":
+          description: Collection info + items.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CollectionItemsResponse" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/watching:
+    get:
+      tags: [Watching]
+      summary: Get watching info for an item
+      operationId: getWatchingInfo
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema: { type: integer }
+          description: Item id.
+      responses:
+        "200":
+          description: Watching info.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WatchingInfoResponse" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/watching/movies:
+    get:
+      tags: [Watching]
+      summary: Continue watching (movies)
+      operationId: listWatchingMovies
+      responses:
+        "200":
+          description: Continue watching list for movie-like content.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WatchingMoviesResponse" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/watching/serials:
+    get:
+      tags: [Watching]
+      summary: Series with new/unwatched episodes
+      operationId: listWatchingSerials
+      responses:
+        "200":
+          description: List of series with new/unwatched episodes.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WatchingSerialsResponse" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/watching/marktime:
+    get:
+      tags: [Watching]
+      summary: Mark playback time (progress sync)
+      operationId: markWatchingTime
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema: { type: integer }
+          description: Item id.
+        - name: video
+          in: query
+          required: true
+          schema: { type: integer }
+          description: Media/video id.
+        - name: time
+          in: query
+          required: true
+          schema: { type: integer }
+          description: Playback position (seconds).
+        - name: season
+          in: query
+          required: false
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Status.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StatusResponse" }
+              example: { status: 200 }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/watching/toggle:
+    get:
+      tags: [Watching]
+      summary: Toggle watched/unwatched state
+      operationId: toggleWatched
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema: { type: integer }
+        - name: video
+          in: query
+          required: false
+          schema: { type: integer }
+        - name: season
+          in: query
+          required: false
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Watched state result.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ToggleWatchedResponse" }
+              example: { status: 200, watched: 1 }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/watching/togglewatchlist:
+    get:
+      tags: [Watching]
+      summary: Toggle watchlist (subscribe/unsubscribe)
+      operationId: toggleWatchlist
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Watchlist toggle result.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ToggleWatchlistResponse" }
+              example: { status: 200, watching: true }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/history:
+    get:
+      tags: [History]
+      summary: Get watch history
+      operationId: getHistory
+      parameters:
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/perpage"
+      responses:
+        "200":
+          description: Watch history entries. Note the list field is `history` (not `items`).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HistoryResponse" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/history/clear-for-media:
+    post:
+      tags: [History]
+      summary: Clear history for a media/episode/video
+      operationId: clearHistoryForMedia
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema: { type: integer }
+          description: Media id.
+      responses:
+        "200":
+          description: Returns JSON `null`.
+          content:
+            application/json:
+              schema:
+                type: object
+                nullable: true
+              example: null
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/history/clear-for-season:
+    post:
+      tags: [History]
+      summary: Clear history for a season
+      operationId: clearHistoryForSeason
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema: { type: integer }
+          description: Season id.
+      responses:
+        "200":
+          description: Returns JSON `null`.
+          content:
+            application/json:
+              schema:
+                type: object
+                nullable: true
+              example: null
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/history/clear-for-item:
+    post:
+      tags: [History]
+      summary: Clear history for an item
+      operationId: clearHistoryForItem
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema: { type: integer }
+          description: Item id.
+      responses:
+        "200":
+          description: Returns JSON `null`.
+          content:
+            application/json:
+              schema:
+                type: object
+                nullable: true
+              example: null
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/tv:
+    get:
+      tags: [TV]
+      summary: List TV channels
+      operationId: listTvChannels
+      responses:
+        "200":
+          description: TV channels.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TvChannelsResponse" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/references/server-location:
+    get:
+      tags: [References]
+      summary: List server locations
+      operationId: listServerLocations
+      responses:
+        "200":
+          description: Server locations.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerLocationsResponse" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/references/streaming-type:
+    get:
+      tags: [References]
+      summary: List streaming types
+      operationId: listStreamingTypes
+      responses:
+        "200":
+          description: Streaming types.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StreamingTypesResponse" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/references/voiceover-type:
+    get:
+      tags: [References]
+      summary: List voiceover/dubbing types
+      operationId: listVoiceoverTypes
+      responses:
+        "200":
+          description: Voiceover types.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VoiceoverTypesResponse" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/references/voiceover-author:
+    get:
+      tags: [References]
+      summary: List voiceover authors
+      operationId: listVoiceoverAuthors
+      responses:
+        "200":
+          description: Voiceover authors.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VoiceoverAuthorsResponse" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/references/video-quality:
+    get:
+      tags: [References]
+      summary: List video quality options
+      operationId: listVideoQualities
+      responses:
+        "200":
+          description: Video qualities.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VideoQualitiesResponse" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: "Preferred authentication mechanism: `Authorization: Bearer <access_token>`."
+    accessTokenQuery:
+      type: apiKey
+      in: query
+      name: access_token
+      description: "Legacy authentication mechanism: `?access_token=<access_token>`."
+
+  parameters:
+    page:
+      name: page
+      in: query
+      required: false
+      schema: { type: integer, minimum: 1 }
+    perpage:
+      name: perpage
+      in: query
+      required: false
+      schema: { type: integer, minimum: 1 }
+    deviceIdPath:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer }
+
+  responses:
+    Unauthorized:
+      description: Unauthorized / invalid or missing access token.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/UnauthorizedError" }
+          example:
+            status: 401
+            error: unauthorized
+
+  schemas:
+    # --- Errors ---
+    UnauthorizedError:
+      type: object
+      required: [status, error]
+      properties:
+        status: { type: integer, example: 401 }
+        error: { type: string, example: unauthorized }
+
+    AuthErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+        error_description: { type: string, nullable: true }
+
+    # --- OAuth ---
+    DeviceCodeResponse:
+      type: object
+      required: [code, user_code, verification_uri, expires_in, interval]
+      properties:
+        code: { type: string }
+        user_code: { type: string }
+        verification_uri: { type: string, format: uri }
+        expires_in: { type: integer, description: "Seconds until device code expires." }
+        interval: { type: integer, description: "Minimum polling interval (seconds)." }
+
+    TokenResponse:
+      type: object
+      required: [access_token, expires_in, refresh_token]
+      properties:
+        access_token: { type: string }
+        token_type: { type: string, nullable: true, description: "May be omitted by the API; default to Bearer." }
+        expires_in: { type: integer }
+        refresh_token: { type: string }
+        scope: { type: string, nullable: true, description: "API returns null in this client." }
+
+    # --- Common ---
+    StatusResponse:
+      type: object
+      required: [status]
+      properties:
+        status: { type: integer, example: 200 }
+
+    Pagination:
+      type: object
+      required: [total, current, perpage]
+      properties:
+        total: { type: integer }
+        current: { type: integer }
+        perpage: { type: integer }
+        total_items: { type: integer, nullable: true, description: "Total number of items across all pages (when provided by API)." }
+        total_count: { type: integer, nullable: true }
+
+    Posters:
+      type: object
+      properties:
+        small: { type: string, format: uri, description: "Portrait poster URL. Observed size: 165x250 px." }
+        medium: { type: string, format: uri, description: "Portrait poster URL. Observed size: 250x375 px." }
+        big: { type: string, format: uri, description: "Portrait poster URL. Observed size: 500x750 px." }
+        wide: { type: string, format: uri, description: "Wide artwork URL for backgrounds (optional). Size is not fixed; observed: 1280x720, 1920x1080, 2800x1575, 3840x2160, and sometimes 1536x1024 or 2098x1381." }
+
+    Duration:
+      type: object
+      properties:
+        average: { type: number, format: float, description: "Can be floating point." }
+        total: { type: integer }
+
+    # --- Content dictionaries ---
+    ContentType:
+      type: object
+      required: [id, title]
+      properties:
+        id: { type: string }
+        title: { type: string }
+
+    Genre:
+      type: object
+      required: [id, title]
+      properties:
+        id: { type: integer }
+        title: { type: string }
+        type: { type: string, nullable: true }
+
+    Country:
+      type: object
+      required: [id, title]
+      properties:
+        id: { type: integer }
+        title: { type: string }
+
+    TrailerSummary:
+      type: object
+      properties:
+        id: { type: integer, nullable: true }
+        file: { type: string, nullable: true, description: "Relative file path (e.g. /trailers/x/y/id.mp4) when provided." }
+        url: { type: string, format: uri, nullable: true, description: "Streaming URL (HLS) when provided." }
+
+    Track:
+      type: object
+      properties:
+        artists: { type: string, nullable: true }
+        title: { type: string, nullable: true }
+        url: { type: string, nullable: true }
+
+    ContentItem:
+      type: object
+      properties:
+        id: { type: integer }
+        title: { type: string }
+        type: { type: string }
+        subtype: { type: string, nullable: true }
+        year: { type: integer, nullable: true }
+        cast: { type: string, nullable: true }
+        director: { type: string, nullable: true }
+        voice: { type: string, nullable: true }
+        duration: { $ref: "#/components/schemas/Duration" }
+        langs: { type: integer, nullable: true }
+        ac3: { type: integer, nullable: true }
+        subtitles: { type: integer, nullable: true }
+        quality: { type: integer, nullable: true }
+        genres:
+          type: array
+          items: { $ref: "#/components/schemas/Genre" }
+        countries:
+          type: array
+          items: { $ref: "#/components/schemas/Country" }
+        plot: { type: string, nullable: true }
+        imdb: { type: integer, nullable: true }
+        imdb_rating: { type: number, format: float, nullable: true }
+        imdb_votes: { type: integer, nullable: true }
+        kinopoisk: { type: integer, nullable: true }
+        kinopoisk_rating: { type: number, format: float, nullable: true }
+        kinopoisk_votes: { type: integer, nullable: true }
+        rating: { type: integer, nullable: true }
+        rating_votes: { type: integer, nullable: true }
+        rating_percentage: { type: integer, nullable: true }
+        views: { type: integer, nullable: true }
+        comments: { type: integer, nullable: true }
+        finished: { type: boolean, nullable: true }
+        advert: { type: boolean, nullable: true }
+        poor_quality: { type: boolean, nullable: true }
+        in_watchlist: { type: boolean, nullable: true }
+        subscribed: { type: boolean, nullable: true }
+        created_at: { type: integer, nullable: true }
+        updated_at: { type: integer, nullable: true }
+        posters: { $ref: "#/components/schemas/Posters" }
+        trailer: { $ref: "#/components/schemas/TrailerSummary" }
+        tracklist:
+          type: array
+          nullable: true
+          items: { $ref: "#/components/schemas/Track" }
+        watched: { type: integer, nullable: true }
+        watching: { $ref: "#/components/schemas/ItemWatchingState" }
+        bookmarks:
+          type: array
+          nullable: true
+          items: { $ref: "#/components/schemas/BookmarkFolder" }
+        seasons:
+          type: array
+          nullable: true
+          items: { $ref: "#/components/schemas/Season" }
+        videos:
+          type: array
+          nullable: true
+          items: { $ref: "#/components/schemas/Episode" }
+
+    ItemsResponse:
+      type: object
+      required: [status, items]
+      properties:
+        status: { type: integer }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/ContentItem" }
+        pagination: { $ref: "#/components/schemas/Pagination" }
+
+    ItemWatchingState:
+      type: object
+      properties:
+        status: { type: integer }
+        time: { type: integer }
+
+    SeasonWatching:
+      type: object
+      properties:
+        status: { type: integer, nullable: true }
+        episodes:
+          type: array
+          nullable: true
+          items: { $ref: "#/components/schemas/EpisodeWatching" }
+
+    EpisodeWatching:
+      type: object
+      properties:
+        id: { type: integer }
+        number: { type: integer, nullable: true }
+        status: { type: integer, nullable: true }
+        time: { type: integer, nullable: true }
+
+    Episode:
+      type: object
+      properties:
+        id: { type: integer }
+        number: { type: integer, nullable: true }
+        snumber: { type: integer, nullable: true, description: "Season number for this media (when provided)." }
+        title: { type: string, nullable: true }
+        thumbnail: { type: string, format: uri, nullable: true, description: "Episode thumbnail image. Observed size: 480x270 px (URL often ends with /480x270.jpg)." }
+        duration: { type: integer, nullable: true }
+        watched: { type: integer, nullable: true }
+        time: { type: integer, nullable: true }
+        status: { type: integer, nullable: true }
+        watching: { $ref: "#/components/schemas/ItemWatchingState" }
+        tracks: { type: integer, nullable: true, description: "Number of available audio tracks (when provided)." }
+        ac3: { type: integer, nullable: true }
+        audios:
+          type: array
+          nullable: true
+          items: { $ref: "#/components/schemas/AudioTrack" }
+        subtitles:
+          type: array
+          nullable: true
+          items: { $ref: "#/components/schemas/Subtitle" }
+        files:
+          type: array
+          nullable: true
+          items: { $ref: "#/components/schemas/MediaFile" }
+
+    Season:
+      type: object
+      properties:
+        id: { type: integer, nullable: true }
+        number: { type: integer, nullable: true }
+        title: { type: string, nullable: true }
+        watching: { $ref: "#/components/schemas/SeasonWatching" }
+        episodes:
+          type: array
+          items: { $ref: "#/components/schemas/Episode" }
+
+    ItemDetail:
+      type: object
+      properties:
+        id: { type: integer }
+        title: { type: string }
+        type: { type: string }
+        posters: { $ref: "#/components/schemas/Posters" }
+        seasons:
+          type: array
+          items: { $ref: "#/components/schemas/Season" }
+        videos:
+          type: array
+          items: { $ref: "#/components/schemas/Episode" }
+
+    ItemDetailResponse:
+      type: object
+      required: [status, item]
+      properties:
+        status: { type: integer }
+        item: { $ref: "#/components/schemas/ContentItem" }
+
+    TypesResponse:
+      type: object
+      required: [status, items]
+      properties:
+        status: { type: integer }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/ContentType" }
+
+    GenresResponse:
+      type: object
+      required: [status, items]
+      properties:
+        status: { type: integer }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Genre" }
+
+    CountriesResponse:
+      type: object
+      required: [status, items]
+      properties:
+        status: { type: integer }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Country" }
+
+    SubtitleLanguage:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Subtitle language code (API-defined), e.g. `rus`, `eng`.
+        title: { type: string, nullable: true }
+
+    SubtitlesResponse:
+      type: object
+      required: [status, items]
+      properties:
+        status: { type: integer }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/SubtitleLanguage" }
+
+    # --- Media links ---
+    VideoUrls:
+      type: object
+      properties:
+        http: { type: string, format: uri, nullable: true }
+        hls: { type: string, format: uri, nullable: true }
+        hls2: { type: string, format: uri, nullable: true }
+        hls4: { type: string, format: uri, nullable: true }
+
+    MediaFile:
+      type: object
+      properties:
+        codec: { type: string, nullable: true }
+        w: { type: integer, nullable: true }
+        h: { type: integer, nullable: true }
+        quality: { type: string, nullable: true }
+        quality_id: { type: integer, nullable: true }
+        file: { type: string, nullable: true }
+        url: { $ref: "#/components/schemas/VideoUrls" }
+        urls: { $ref: "#/components/schemas/VideoUrls" }
+
+    AudioTrack:
+      type: object
+      properties:
+        id: { type: integer }
+        index: { type: integer, nullable: true }
+        codec: { type: string, nullable: true }
+        channels: { type: integer, nullable: true }
+        lang: { type: string, nullable: true }
+        type: { $ref: "#/components/schemas/VoiceoverType" }
+        author: { $ref: "#/components/schemas/VoiceoverAuthor" }
+
+    Subtitle:
+      type: object
+      properties:
+        lang: { type: string }
+        shift: { type: integer, nullable: true }
+        embed: { type: boolean, nullable: true }
+        forced: { type: boolean, nullable: true }
+        file: { type: string, nullable: true }
+        url: { type: string, format: uri, nullable: true }
+
+    MediaLinksResponse:
+      type: object
+      properties:
+        id: { type: integer, nullable: true }
+        files:
+          type: array
+          items: { $ref: "#/components/schemas/MediaFile" }
+        subtitles:
+          type: array
+          items: { $ref: "#/components/schemas/Subtitle" }
+        thumbnail: { type: string, format: uri, nullable: true, description: "Preview thumbnail image for the media. Observed size: 480x270 px (URL often ends with /480x270.jpg)." }
+
+    MediaVideoLinkResponse:
+      type: object
+      required: [url]
+      properties:
+        url: { type: string, format: uri }
+
+    # --- Trailer ---
+    Trailer:
+      type: object
+      properties:
+        id: { type: integer, nullable: true }
+        url: { type: string, format: uri, nullable: true }
+
+    TrailerResponse:
+      type: object
+      required: [status]
+      properties:
+        status: { type: integer }
+        trailer:
+          type: array
+          nullable: true
+          items: { $ref: "#/components/schemas/Trailer" }
+
+    # --- Voting / comments ---
+    VoteResponse:
+      type: object
+      properties:
+        voted: { type: boolean }
+        total: { type: string }
+        positive: { type: string }
+        negative: { type: string }
+        rating: { type: integer, nullable: true }
+
+    ItemRef:
+      type: object
+      properties:
+        id: { type: integer }
+        title: { type: string }
+
+    CommentUser:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        avatar: { type: string, format: uri, nullable: true, description: "User avatar image URL. Observed (this account): 80x80 px JPEG (gravatar default). May vary by provider/parameters." }
+
+    Comment:
+      type: object
+      properties:
+        id: { type: integer }
+        depth: { type: integer, nullable: true }
+        unread: { type: boolean, nullable: true }
+        deleted: { type: boolean, nullable: true }
+        message: { type: string, nullable: true }
+        created: { type: integer, nullable: true }
+        rating: { type: string, nullable: true }
+        user: { $ref: "#/components/schemas/CommentUser" }
+
+    CommentsResponse:
+      type: object
+      required: [status]
+      properties:
+        status: { type: integer }
+        item: { $ref: "#/components/schemas/ItemRef" }
+        comments:
+          type: array
+          items: { $ref: "#/components/schemas/Comment" }
+
+    # --- Bookmarks ---
+    BookmarkFolder:
+      type: object
+      properties:
+        id: { type: integer }
+        user_id: { type: integer, nullable: true }
+        title: { type: string }
+        views: { type: integer, nullable: true }
+        count: { type: integer, nullable: true }
+        created: { type: integer, nullable: true }
+        updated: { type: integer, nullable: true }
+        created_at: { type: integer, nullable: true }
+        updated_at: { type: integer, nullable: true }
+
+    BookmarkFoldersResponse:
+      type: object
+      required: [status, items]
+      properties:
+        status: { type: integer }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/BookmarkFolder" }
+
+    BookmarkItemsResponse:
+      type: object
+      required: [status, items]
+      properties:
+        status: { type: integer }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/ContentItem" }
+        pagination: { $ref: "#/components/schemas/Pagination" }
+
+    ItemFoldersResponse:
+      type: object
+      required: [status, folders]
+      properties:
+        status: { type: integer }
+        folders:
+          type: array
+          items: { $ref: "#/components/schemas/BookmarkFolder" }
+
+    CreateFolderResponse:
+      type: object
+      required: [status, folder]
+      properties:
+        status: { type: integer }
+        folder: { $ref: "#/components/schemas/BookmarkFolder" }
+
+    BookmarkActionResponse:
+      type: object
+      required: [status]
+      properties:
+        status: { type: integer }
+        exists: { type: boolean, nullable: true }
+
+    # --- Collections ---
+    Collection:
+      type: object
+      properties:
+        id: { type: integer }
+        title: { type: string }
+        views: { type: integer, nullable: true }
+        watchers: { type: integer, nullable: true }
+        count: { type: integer, nullable: true }
+        posters: { $ref: "#/components/schemas/Posters" }
+        created: { type: integer, nullable: true }
+        updated: { type: integer, nullable: true }
+
+    CollectionsResponse:
+      type: object
+      required: [status, items]
+      properties:
+        status: { type: integer }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Collection" }
+        pagination: { $ref: "#/components/schemas/Pagination" }
+
+    CollectionItemsResponse:
+      type: object
+      required: [status, collection, items]
+      properties:
+        status: { type: integer }
+        collection: { $ref: "#/components/schemas/Collection" }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/ContentItem" }
+        pagination: { $ref: "#/components/schemas/Pagination" }
+
+    # --- Watching ---
+    WatchingEpisode:
+      type: object
+      properties:
+        id: { type: integer }
+        number: { type: integer, nullable: true }
+        title: { type: string, nullable: true }
+        duration: { type: integer, nullable: true }
+        status: { type: integer, nullable: true }
+        time: { type: integer, nullable: true }
+        updated: { type: integer, nullable: true }
+
+    WatchingSeason:
+      type: object
+      properties:
+        number: { type: integer, nullable: true }
+        status: { type: integer, nullable: true }
+        episodes:
+          type: array
+          items: { $ref: "#/components/schemas/WatchingEpisode" }
+
+    WatchingItem:
+      type: object
+      properties:
+        id: { type: integer }
+        title: { type: string }
+        type: { type: string }
+        subtype: { type: string, nullable: true }
+        status: { type: integer, nullable: true }
+        posters: { $ref: "#/components/schemas/Posters" }
+        videos:
+          type: array
+          nullable: true
+          items: { $ref: "#/components/schemas/WatchingEpisode" }
+        seasons:
+          type: array
+          items: { $ref: "#/components/schemas/WatchingSeason" }
+
+    WatchingInfoResponse:
+      type: object
+      required: [status, item]
+      properties:
+        status: { type: integer }
+        item: { $ref: "#/components/schemas/WatchingItem" }
+
+    WatchingMovieItem:
+      type: object
+      properties:
+        id: { type: integer }
+        title: { type: string }
+        type: { type: string }
+        subtype: { type: string, nullable: true }
+        posters: { $ref: "#/components/schemas/Posters" }
+
+    WatchingMoviesResponse:
+      type: object
+      required: [status, items]
+      properties:
+        status: { type: integer }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/WatchingMovieItem" }
+
+    WatchingSerialItem:
+      type: object
+      properties:
+        id: { type: integer }
+        title: { type: string }
+        type: { type: string }
+        subtype: { type: string, nullable: true }
+        posters: { $ref: "#/components/schemas/Posters" }
+        new: { type: integer, nullable: true }
+        total: { type: integer, nullable: true }
+        watched: { type: integer, nullable: true }
+
+    WatchingSerialsResponse:
+      type: object
+      required: [status, items]
+      properties:
+        status: { type: integer }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/WatchingSerialItem" }
+
+    ToggleWatchedResponse:
+      type: object
+      required: [status, watched]
+      properties:
+        status: { type: integer }
+        watched: { type: integer, description: "API-defined (commonly 0|1)." }
+        watching: { $ref: "#/components/schemas/ItemWatchingState" }
+
+    ToggleWatchlistResponse:
+      type: object
+      required: [status, watching]
+      properties:
+        status: { type: integer }
+        watching: { type: boolean }
+
+    # --- History ---
+    HistoryMedia:
+      allOf:
+        - $ref: "#/components/schemas/Episode"
+
+    HistoryItem:
+      allOf:
+        - $ref: "#/components/schemas/ContentItem"
+
+    HistoryEntry:
+      type: object
+      properties:
+        counter: { type: integer, nullable: true }
+        first_seen: { type: integer, nullable: true }
+        last_seen: { type: integer, nullable: true }
+        time: { type: integer, nullable: true }
+        deleted: { type: boolean, nullable: true }
+        item: { $ref: "#/components/schemas/ContentItem" }
+        media: { $ref: "#/components/schemas/Episode" }
+
+    HistoryResponse:
+      type: object
+      required: [status, history]
+      properties:
+        status: { type: integer }
+        history:
+          type: array
+          items: { $ref: "#/components/schemas/HistoryEntry" }
+        pagination: { $ref: "#/components/schemas/Pagination" }
+
+    # --- TV ---
+    TvLogos:
+      type: object
+      properties:
+        s: { type: string, format: uri, nullable: true, description: "Channel logo URL. Observed size: 240x180 px PNG (API often returns the same URL for s and m)." }
+        m: { type: string, format: uri, nullable: true, description: "Channel logo URL. Observed size: 240x180 px PNG (API often returns the same URL for s and m)." }
+        l: { type: string, format: uri, nullable: true, description: "Large channel logo URL (optional). Not observed in current /v1/tv responses; size unknown." }
+
+    TvChannel:
+      type: object
+      properties:
+        id: { type: integer }
+        title: { type: string }
+        name: { type: string, nullable: true }
+        logos: { $ref: "#/components/schemas/TvLogos" }
+        stream: { type: string, format: uri, nullable: true }
+        playlist: { type: string, nullable: true }
+        embed: { type: string, nullable: true }
+        current: { type: string, nullable: true }
+        status: { type: integer, nullable: true }
+
+    TvChannelsResponse:
+      type: object
+      required: [status, channels]
+      properties:
+        status: { type: integer }
+        channels:
+          type: array
+          items: { $ref: "#/components/schemas/TvChannel" }
+
+    # --- References ---
+    ServerLocation:
+      type: object
+      properties:
+        id: { type: integer }
+        location: { type: string }
+        name: { type: string }
+
+    ServerLocationsResponse:
+      type: object
+      required: [status, items]
+      properties:
+        status: { type: integer }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/ServerLocation" }
+
+    StreamingType:
+      type: object
+      properties:
+        id: { type: integer }
+        code: { type: string }
+        version: { type: integer, nullable: true }
+        name: { type: string }
+        description: { type: string, nullable: true }
+
+    StreamingTypesResponse:
+      type: object
+      required: [status, items]
+      properties:
+        status: { type: integer }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/StreamingType" }
+
+    VoiceoverType:
+      type: object
+      properties:
+        id: { type: integer }
+        title: { type: string }
+        short_title: { type: string, nullable: true }
+
+    VoiceoverTypesResponse:
+      type: object
+      required: [status, items]
+      properties:
+        status: { type: integer }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/VoiceoverType" }
+
+    VoiceoverAuthor:
+      type: object
+      properties:
+        id: { type: integer }
+        title: { type: string }
+        short_title: { type: string, nullable: true }
+
+    VoiceoverAuthorsResponse:
+      type: object
+      required: [status, items]
+      properties:
+        status: { type: integer }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/VoiceoverAuthor" }
+
+    VideoQuality:
+      type: object
+      properties:
+        id: { type: integer }
+        title: { type: string }
+        quality: { type: integer }
+
+    VideoQualitiesResponse:
+      type: object
+      required: [status, items]
+      properties:
+        status: { type: integer }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/VideoQuality" }
+
+    # --- User ---
+    Subscription:
+      type: object
+      properties:
+        active: { type: boolean }
+        end_time: { type: integer, nullable: true }
+        days: { type: number, nullable: true }
+
+    UserProfile:
+      type: object
+      properties:
+        name: { type: string, nullable: true }
+        avatar: { type: string, format: uri, nullable: true, description: "User avatar image URL. Observed (this account): 80x80 px JPEG (gravatar default). May vary by provider/parameters." }
+
+    UserSettings:
+      type: object
+      properties:
+        show_erotic: { type: boolean, nullable: true }
+        show_uncertain: { type: boolean, nullable: true }
+
+    User:
+      type: object
+      properties:
+        username: { type: string }
+        reg_date: { type: integer, nullable: true }
+        subscription: { $ref: "#/components/schemas/Subscription" }
+        settings: { $ref: "#/components/schemas/UserSettings" }
+        profile: { $ref: "#/components/schemas/UserProfile" }
+
+    UserResponse:
+      type: object
+      required: [status, user]
+      properties:
+        status: { type: integer }
+        user: { $ref: "#/components/schemas/User" }
+
+    # --- Device ---
+    SettingValue:
+      type: object
+      properties:
+        label: { type: string, nullable: true }
+        value:
+          description: Value type varies by setting and endpoint.
+          oneOf:
+            - { type: boolean }
+            - { type: integer }
+            - { type: number }
+            - { type: string }
+            - { type: array, items: { $ref: "#/components/schemas/SettingOption" } }
+            - { type: object, additionalProperties: true }
+          nullable: true
+        type: { type: string, nullable: true }
+
+    SettingOption:
+      type: object
+      properties:
+        id: { type: integer, nullable: true }
+        label: { type: string, nullable: true }
+        description: { type: string, nullable: true }
+        selected: { type: integer, nullable: true, description: "API-defined (commonly 1|0)." }
+
+    Device:
+      type: object
+      properties:
+        id: { type: integer }
+        title: { type: string, nullable: true }
+        hardware: { type: string, nullable: true }
+        software: { type: string, nullable: true }
+        created: { type: integer, nullable: true }
+        updated: { type: integer, nullable: true }
+        last_seen: { type: integer, nullable: true }
+        is_browser: { type: boolean, nullable: true }
+        settings:
+          type: object
+          additionalProperties: { $ref: "#/components/schemas/SettingValue" }
+
+    DevicesResponse:
+      type: object
+      required: [status, devices]
+      properties:
+        status: { type: integer }
+        devices:
+          type: array
+          items: { $ref: "#/components/schemas/Device" }
+
+    DeviceResponse:
+      type: object
+      required: [status, device]
+      properties:
+        status: { type: integer }
+        device: { $ref: "#/components/schemas/Device" }
+
+    DeviceSettingsResponse:
+      type: object
+      required: [status, settings]
+      properties:
+        status: { type: integer }
+        settings:
+          type: object
+          additionalProperties: { $ref: "#/components/schemas/SettingValue" }
+
+    DeviceRemoveResponse:
+      type: object
+      required: [status]
+      properties:
+        status: { type: integer }
+        current: { type: boolean, nullable: true }
+

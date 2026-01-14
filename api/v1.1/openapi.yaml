@@ -1,0 +1,189 @@
+openapi: 3.0.3
+info:
+  title: KinoPub API v1.1
+  version: "1.1"
+  description: >
+    API v1.1 endpoints observed in `tools/kinoapi_tests` output (base URL differs from v1).
+
+servers:
+  - url: https://cdn-service.space/
+
+paths:
+  /api2/v1.1/items/search:
+    get:
+      summary: Search items
+      operationId: api2SearchItems
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema: { type: string }
+        - name: page
+          in: query
+          required: false
+          schema: { type: integer }
+        - name: perpage
+          in: query
+          required: false
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Search results
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Api2ItemsSearchResponse" }
+        "404":
+          description: Not found (may return HTML)
+
+  /api2/v1.1/items/{id}:
+    get:
+      summary: Get basic item info
+      operationId: api2GetItemDetails
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Item details
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Api2ItemDetailsResponse" }
+        "404":
+          description: Not found (may return HTML)
+
+  /api2/v1.1/items/collections/{id}:
+    get:
+      summary: Get collections for an item
+      operationId: api2GetItemCollections
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Collections list
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Api2ItemCollectionsResponse" }
+        "404":
+          description: Not found (may return HTML)
+
+  /api2/v1/backdrop/{id}:
+    get:
+      summary: Get backdrop URL (wide artwork)
+      operationId: api2GetBackdrop
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+          description: IMDb numeric id (field `imdb` in API2 item objects).
+        - name: kp_id
+          in: query
+          required: true
+          schema: { type: integer }
+          description: KinoPub item id (field `id` in API2 item objects). Despite the name, this is not the `kinopoisk` field.
+      responses:
+        "200":
+          description: Backdrop image URL (string)
+          content:
+            application/json:
+              schema: { type: string, format: uri }
+            text/plain:
+              schema: { type: string, format: uri }
+        "404":
+          description: Not found (may return HTML)
+
+components:
+  schemas:
+    Api2Pagination:
+      type: object
+      properties:
+        total: { type: integer, nullable: true }
+        current: { type: integer, nullable: true }
+        perpage: { type: integer, nullable: true }
+        total_items: { type: integer, nullable: true }
+
+    Api2Posters:
+      type: object
+      properties:
+        small: { type: string, format: uri, nullable: true }
+        medium: { type: string, format: uri, nullable: true }
+        big: { type: string, format: uri, nullable: true }
+        wide: { type: string, format: uri, nullable: true, description: "High-res 16:9 artwork when available." }
+
+    Api2SearchItem:
+      type: object
+      required: [id, title, type]
+      properties:
+        id: { type: integer }
+        title: { type: string }
+        type: { type: string }
+        value: { type: string, nullable: true }
+        year: { type: integer, nullable: true }
+        voice: { type: string, nullable: true }
+        cast: { type: string, nullable: true }
+        director: { type: string, nullable: true }
+        plot: { type: string, nullable: true }
+        finished: { type: boolean, nullable: true }
+        advert: { type: boolean, nullable: true }
+        poor_quality: { type: boolean, nullable: true }
+        posters: { $ref: "#/components/schemas/Api2Posters" }
+        imdb: { type: integer, nullable: true }
+        imdb_rating: { type: number, format: float, nullable: true }
+        kinopoisk: { type: integer, nullable: true }
+        kinopoisk_rating: { type: number, format: float, nullable: true }
+
+    Api2ItemsSearchResponse:
+      type: object
+      required: [status, items]
+      properties:
+        status: { type: integer }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Api2SearchItem" }
+        pagination: { $ref: "#/components/schemas/Api2Pagination" }
+
+    Api2ItemDetails:
+      type: object
+      required: [id]
+      properties:
+        id: { type: integer }
+        title: { type: string, nullable: true }
+        age_rating: { type: integer, nullable: true }
+        fps: { type: number, format: float, nullable: true }
+        imdb: { type: integer, nullable: true }
+        imdb_rating: { type: number, format: float, nullable: true }
+        kinopoisk: { type: integer, nullable: true }
+        kinopoisk_rating: { type: number, format: float, nullable: true }
+
+    Api2ItemDetailsResponse:
+      type: object
+      required: [status, item]
+      properties:
+        status: { type: integer }
+        item: { $ref: "#/components/schemas/Api2ItemDetails" }
+
+    Api2Collection:
+      type: object
+      required: [id, title]
+      properties:
+        id: { type: integer }
+        title: { type: string }
+        views: { type: integer, nullable: true }
+        watchers: { type: integer, nullable: true }
+        created: { type: integer, nullable: true }
+        updated: { type: integer, nullable: true }
+        posters: { $ref: "#/components/schemas/Api2Posters" }
+
+    Api2ItemCollectionsResponse:
+      type: object
+      required: [status, items]
+      properties:
+        status: { type: integer }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Api2Collection" }
